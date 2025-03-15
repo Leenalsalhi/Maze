@@ -38,7 +38,7 @@ class Maze:
         with open(filename) as f:
             contents = f.read()
 
-        # Ensure that the maze contains exactly one start and one goal point
+      
         self.starts = []
         self.goals = []
         contents = contents.splitlines()
