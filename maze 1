@@ -1,0 +1,169 @@
+import sys
+import heapq
+import time
+from PIL import Image, ImageDraw
+
+class Node:
+    def __init__(self, state, parent, action, g_cost=0, h_cost=0):
+        self.state = state
+        self.parent = parent
+        self.action = action
+        self.g_cost = g_cost 
+        self.h_cost = h_cost 
+        self.f_cost = g_cost + h_cost 
+
+    def __lt__(self, other):
+        return self.f_cost < other.f_cost
+
+class PriorityQueue:
+    def __init__(self):
+        self.frontier = []
+
+    def add(self, node):
+        heapq.heappush(self.frontier, node)
+
+    def contains_state(self, state):
+        return any(node.state == state for node in self.frontier)
+
+    def empty(self):
+        return len(self.frontier) == 0
+
+    def remove(self):
+        if self.empty():
+            raise Exception("empty frontier")
+        return heapq.heappop(self.frontier)
+
+class Maze:
+    def __init__(self, filename):
+        with open(filename) as f:
+            contents = f.read()
+
+        # Ensure that the maze contains exactly one start and one goal point
+        self.starts = []
+        self.goals = []
+        contents = contents.splitlines()
+        self.height = len(contents)
+        self.width = max(len(line) for line in contents)
+        
+        self.walls = []
+        for i in range(self.height):
+            row = []
+            for j in range(self.width):
+                if contents[i][j] == "A":
+                    self.start = (i, j)  # Point A as start
+                    row.append(False)
+                elif contents[i][j] == "B":
+                    self.goal = (i, j)  # Point B as goal
+                    row.append(False)
+                elif contents[i][j] == "#":
+                    row.append(True)
+                else:
+                    row.append(False)
+            self.walls.append(row)
+        
+        if not hasattr(self, 'start') or not hasattr(self, 'goal'):
+            raise Exception("Maze must have exactly one start (A) and one goal (B)")
+        
+        self.solution = None
+
+    def manhattan_distance(self, a, b):
+        return abs(a[0] - b[0]) + abs(a[1] - b[1])
+    
+    def chebyshev_distance(self, a, b):
+        return max(abs(a[0] - b[0]), abs(a[1] - b[1]))
+    
+    def neighbors(self, state):
+        row, col = state
+        candidates = [
+            ("up", (row - 1, col)),
+            ("down", (row + 1, col)),
+            ("left", (row, col - 1)),
+            ("right", (row, col + 1))
+        ]
+        result = []
+        for action, (r, c) in candidates:
+            if 0 <= r < self.height and 0 <= c < self.width and not self.walls[r][c]:
+                result.append((action, (r, c)))
+        return result
+    
+    def solve(self, algorithm, heuristic):
+        self.num_explored = 0
+        frontier = PriorityQueue()
+        g_costs = {self.start: 0}
+        
+        h_cost = heuristic(self.start, self.goal)
+        frontier.add(Node(self.start, None, None, g_cost=0, h_cost=h_cost))
+
+        self.explored = set()
+
+        while not frontier.empty():
+            node = frontier.remove()
+            self.num_explored += 1
+            
+            # If we reach the goal position
+            if node.state == self.goal:
+                actions, cells = [], []
+                while node.parent:
+                    actions.append(node.action)
+                    cells.append(node.state)
+                    node = node.parent
+                actions.reverse()
+                cells.reverse()
+                self.solution = (actions, cells)
+                return
+            
+            self.explored.add(node.state)
+            for action, state in self.neighbors(node.state):
+                new_g_cost = node.g_cost + 1
+                if state not in self.explored:
+                    new_h_cost = heuristic(state, self.goal)
+                    frontier.add(Node(state, node, action, g_cost=new_g_cost, h_cost=new_h_cost))
+        
+        print(f"No solution found using {algorithm}")
+        self.solution = None
+    
+    def output_image(self, filename):
+        cell_size = 20
+        cell_border = 2
+        img = Image.new("RGBA", (self.width * cell_size, self.height * cell_size), "black")
+        draw = ImageDraw.Draw(img)
+        solution = self.solution[1] if self.solution is not None else None
+        
+        for i, row in enumerate(self.walls):
+            for j, col in enumerate(row):
+                if col:
+                    fill = (40, 40, 40)
+                elif (i, j) == self.start:
+                    fill = (255, 0, 0)
+                elif (i, j) == self.goal:
+                    fill = (0, 171, 28)
+                elif solution and (i, j) in solution:
+                    fill = (220, 235, 113)
+                else:
+                    fill = (237, 240, 252)
+                
+                draw.rectangle(
+                    [(j * cell_size + cell_border, i * cell_size + cell_border),
+                     ((j + 1) * cell_size - cell_border, (i + 1) * cell_size - cell_border)],
+                    fill=fill
+                )
+        
+        img.save(filename)
+        print(f"Saved maze solution as {filename}")
+
+maze_files = ["maze_30x30.txt", "maze_35x35.txt", "maze_40x40.txt"]
+heuristics = {"Manhattan": "manhattan_distance", "Chebyshev": "chebyshev_distance"}
+algorithms = ["Greedy", "A*"]
+
+for file in maze_files:
+    print(f"Solving {file} using A* and Greedy with Manhattan and Chebyshev heuristics...")
+    m = Maze(file)
+    for h_name, h_func in heuristics.items():
+        for algo in algorithms:
+            start_time = time.time()
+            m.solve(algo, getattr(m, h_func))
+            end_time = time.time()
+            print(f"{algo} ({h_name}) - Nodes Expanded: {m.num_explored}")
+            print(f"{algo} ({h_name}) - Path Cost: {len(m.solution[1]) if m.solution else None}")
+            print(f"{algo} ({h_name}) - Execution Time: {end_time - start_time:.6f} seconds")
+            m.output_image(file.replace(".txt", f"_{algo.replace('*', '_')}_{h_name}.png"))
